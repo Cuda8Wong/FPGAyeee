@@ -1,5 +1,5 @@
 -- =============================================================================
--- flappy_top.vhd
+-- sus_bird.vhd
 -- Top-level entity for Flappy Bird mini-project (COMPSYS 305, 2026)
 -- DE0-CV board
 --
@@ -27,7 +27,7 @@ USE IEEE.STD_LOGIC_1164.ALL;
 USE IEEE.STD_LOGIC_ARITH.ALL;
 USE IEEE.STD_LOGIC_UNSIGNED.ALL;
 
-ENTITY flappy_top IS
+ENTITY sus_bird IS
     PORT (
         CLOCK_50        : IN    STD_LOGIC;
 
@@ -59,22 +59,16 @@ ENTITY flappy_top IS
         -- LEDs
         LEDR            : OUT   STD_LOGIC_VECTOR(9 DOWNTO 0)
     );
-END flappy_top;
+END sus_bird;
 
 
-ARCHITECTURE behavior OF flappy_top IS
+ARCHITECTURE behavior OF sus_bird IS
 
     -- =========================================================================
     -- Component declarations
     -- =========================================================================
 
-    -- PLL: 50 MHz -> 25 MHz for VGA pixel clock
-    COMPONENT vga_pll
-        PORT (
-            inclk0  : IN  STD_LOGIC;
-            c0      : OUT STD_LOGIC
-        );
-    END COMPONENT;
+
 
     -- VGA sync generator (from provided file vga_sync.vhd)
     COMPONENT VGA_SYNC
@@ -212,11 +206,6 @@ BEGIN
     -- =========================================================================
     -- PLL instantiation
     -- =========================================================================
-    pll_inst : vga_pll
-        PORT MAP (
-            inclk0 => CLOCK_50,
-            c0     => clk_25
-        );
 
     -- =========================================================================
     -- VGA_SYNC instantiation
