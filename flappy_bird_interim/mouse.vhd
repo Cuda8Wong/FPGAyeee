@@ -1,5 +1,5 @@
 -- =============================================================================
--- MOUSE.vhd
+-- MOUSE.vhd  (originally from Pong game 2018)
 --
 -- Implements a PS/2 mouse driver using a state machine + two UARTs.
 --
@@ -295,3 +295,173 @@ BEGIN
             SHIFTOUT(0)          <= '0';           -- Start bit
             -- Odd parity: '1' if even number of '1's in data byte
             SHIFTOUT(9) <= NOT (charout(7) XOR charout(6) XOR charout(5) XOR
+                               charout(4) XOR charout(3) XOR charout(2) XOR
+                               charout(1) XOR charout(0));
+            SHIFTOUT(10) <= '1';        -- Stop bit
+            -- Pull DATA low now (start bit) to signal the mouse that a byte follows
+            MOUSE_DATA_BUF <= '0';
+
+        ELSIF (MOUSE_CLK_filter'event AND MOUSE_CLK_filter = '0') THEN
+            -- ---- Clock falling edge: shift out next bit ----
+            IF MOUSE_DATA_DIR = '1' THEN   -- Only when FPGA is driving the data line
+                IF SEND_CHAR = '1' THEN
+                    IF OUTCNT <= "1001" THEN
+                        -- Shift register: move bit [1] onto the data line,
+                        -- then shift everything right and fill [10] with '1' (idle)
+                        OUTCNT                    <= OUTCNT + 1;
+                        SHIFTOUT(9 DOWNTO 0)      <= SHIFTOUT(10 DOWNTO 1);
+                        SHIFTOUT(10)              <= '1';
+                        MOUSE_DATA_BUF            <= SHIFTOUT(1); -- Output next bit
+                        OUTPUT_READY              <= '0';
+                    ELSE
+                        -- All 10 bits sent — transmission complete
+                        SEND_CHAR    <= '0';
+                        OUTPUT_READY <= '1'; -- Signal state machine to proceed
+                        OUTCNT       <= "0000";
+                    END IF;
+                END IF;
+            END IF;
+        END IF;
+    END PROCESS SEND_UART;
+
+    -- =========================================================================
+    -- RX UART: RECV_UART
+    -- Receives bytes from the mouse on falling edges of the filtered PS/2 CLK.
+    -- Also processes complete 3-byte movement packets to update cursor position.
+    --
+    -- Byte reception flow:
+    --   - Wait for DATA = '0' (start bit) with READ_CHAR = '0'
+    --   - Shift in 9 bits (8 data + 1 parity) on subsequent CLK falling edges
+    --   - On the 9th bit, extract the data byte and set IREADY_SET for one cycle
+    --
+    -- Packet processing (PACKET_COUNT):
+    --   "00" = ACK from init command   → reset cursor to screen centre
+    --   "01" = Byte 1 (status/buttons) → update cursor from new_cursor_*
+    --   "10" = Byte 2 (X delta)        → save as PACKET_CHAR2
+    --   "11" = Byte 3 (Y delta)        → compute new cursor position
+    -- =========================================================================
+    RECV_UART : PROCESS(reset, mouse_clk_filter)
+    BEGIN
+        IF RESET = '1' THEN
+            INCNT        <= "0000";
+            READ_CHAR    <= '0';
+            PACKET_COUNT <= "00";
+            LEFT_BUTTON  <= '0';
+            RIGHT_BUTTON <= '0';
+            CHARIN       <= "00000000";
+
+        ELSIF MOUSE_CLK_FILTER'event AND MOUSE_CLK_FILTER = '0' THEN
+            IF MOUSE_DATA_DIR = '0' THEN  -- Only receive when mouse is driving the data line
+
+                IF MOUSE_DATA = '0' AND READ_CHAR = '0' THEN
+                    -- ---- Detected start bit ----
+                    READ_CHAR  <= '1';  -- Begin receiving this byte
+                    IREADY_SET <= '0';
+
+                ELSE
+                    IF READ_CHAR = '1' THEN
+                        IF INCNT < "1001" THEN
+                            -- ---- Shift in the next data bit ----
+                            -- SHIFTIN shifts right: new bit enters at [8], LSB exits at [0]
+                            INCNT                  <= INCNT + 1;
+                            SHIFTIN(7 DOWNTO 0)    <= SHIFTIN(8 DOWNTO 1);
+                            SHIFTIN(8)             <= MOUSE_DATA;
+                            IREADY_SET             <= '0';
+
+                        ELSE
+                            -- ---- All 9 bits received (8 data + parity) ----
+                            CHARIN       <= SHIFTIN(7 DOWNTO 0); -- Save the completed byte
+                            READ_CHAR    <= '0';                  -- Ready for next byte
+                            IREADY_SET   <= '1';                  -- Pulse: byte is ready
+                            PACKET_COUNT <= PACKET_COUNT + 1;
+
+                            -- ==================================================
+                            -- Packet byte processing
+                            -- ==================================================
+                            IF PACKET_COUNT = "00" THEN
+                                -- Byte 0: command ACK (0xFA) — initialise cursor to centre
+                                cursor_column     <= CONV_STD_LOGIC_VECTOR(320, 10);
+                                cursor_row        <= CONV_STD_LOGIC_VECTOR(240, 10);
+                                NEW_cursor_column <= CONV_STD_LOGIC_VECTOR(320, 10);
+                                NEW_cursor_row    <= CONV_STD_LOGIC_VECTOR(240, 10);
+
+                            ELSIF PACKET_COUNT = "01" THEN
+                                -- Byte 1: status byte — apply the previously computed
+                                -- new_cursor_* values (calculated at the end of the last packet).
+                                -- Clamp to screen boundaries to prevent wrap-around.
+                                PACKET_CHAR1 <= SHIFTIN(7 DOWNTO 0);
+
+                                -- ---- Clamp cursor ROW (vertical) ----
+                                -- If cursor is near the top (<128) AND the new position
+                                -- overflowed (>256 or <2), clamp to row 0 (top edge).
+                                IF (cursor_row < 128) AND
+                                   ((NEW_cursor_row > 256) OR (NEW_cursor_row < 2)) THEN
+                                    cursor_row <= CONV_STD_LOGIC_VECTOR(0, 10);
+                                ELSIF NEW_cursor_row > 480 THEN
+                                    cursor_row <= CONV_STD_LOGIC_VECTOR(480, 10); -- Clamp to bottom
+                                ELSE
+                                    cursor_row <= NEW_cursor_row; -- Normal update
+                                END IF;
+
+                                -- ---- Clamp cursor COLUMN (horizontal) ----
+                                IF (cursor_column < 128) AND
+                                   ((NEW_cursor_column > 256) OR (NEW_cursor_column < 2)) THEN
+                                    cursor_column <= CONV_STD_LOGIC_VECTOR(0, 10); -- Clamp to left
+                                ELSIF NEW_cursor_column > 640 THEN
+                                    cursor_column <= CONV_STD_LOGIC_VECTOR(640, 10); -- Clamp to right
+                                ELSE
+                                    cursor_column <= NEW_cursor_column; -- Normal update
+                                END IF;
+
+                            ELSIF PACKET_COUNT = "10" THEN
+                                -- Byte 2: X (column) movement delta — save for end-of-packet calc
+                                PACKET_CHAR2 <= SHIFTIN(7 DOWNTO 0);
+
+                            ELSIF PACKET_COUNT = "11" THEN
+                                -- Byte 3: Y (row) movement delta — all 3 bytes now received
+                                PACKET_CHAR3 <= SHIFTIN(7 DOWNTO 0);
+                            END IF;
+
+                            INCNT <= CONV_STD_LOGIC_VECTOR(0, 4); -- Reset bit counter for next byte
+
+                            IF PACKET_COUNT = "11" THEN
+                                -- ============================================
+                                -- End of complete 3-byte packet: compute new cursor position.
+                                --
+                                -- The X and Y deltas are 9-bit signed values:
+                                --   bit [7] of PACKET_CHAR2/3 is the magnitude byte.
+                                --   The sign bit lives in PACKET_CHAR1 bits [4] (Y) / [5] (not
+                                --   used directly here — instead byte 1 sign bit is used via
+                                --   sign-extension with PACKET_CHAR3(7)/PACKET_CHAR2(7)).
+                                --
+                                -- Sign-extend to 10 bits by prepending two copies of bit [7]:
+                                --   positive delta: "00" & byte  → adds a small positive value
+                                --   negative delta: "11" & byte  → two's-complement subtraction
+                                --
+                                -- Y is SUBTRACTED because screen rows increase downward but
+                                -- mouse Y movement is positive-upward.
+                                -- X is ADDED because both increase in the same direction.
+                                -- ============================================
+                                PACKET_COUNT <= "01"; -- Reset to byte 1 for next packet
+
+                                -- New row = current row − sign_extended(Y delta)
+                                NEW_cursor_row <= cursor_row -
+                                    (PACKET_CHAR3(7) & PACKET_CHAR3(7) & PACKET_CHAR3);
+
+                                -- New column = current column + sign_extended(X delta)
+                                NEW_cursor_column <= cursor_column +
+                                    (PACKET_CHAR2(7) & PACKET_CHAR2(7) & PACKET_CHAR2);
+
+                                -- Extract button states from status byte (bit 0 = left, bit 1 = right)
+                                LEFT_BUTTON  <= PACKET_CHAR1(0);
+                                RIGHT_BUTTON <= PACKET_CHAR1(1);
+                            END IF;
+
+                        END IF;
+                    END IF;
+                END IF;
+            END IF;
+        END IF;
+    END PROCESS RECV_UART;
+
+END behavior;
