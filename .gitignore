@@ -1,0 +1,9 @@
+/flappy_bird_interim/db
+/flappy_bird_interim/hc_output
+/flappy_bird_interim/incremental_db/compiled_partitions
+/flappy_bird_interim/incremental_db
+/flappy_bird_interim/output_files
+*.txt
+*.bak
+*.dat
+/MiniprojectResources/db
