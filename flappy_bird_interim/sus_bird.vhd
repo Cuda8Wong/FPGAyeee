@@ -279,32 +279,29 @@ BEGIN
     -- the VGA interface here is 1-bit per channel.  True orange would need a
     -- multi-bit DAC; this gives the closest visible distinction available.
     -- =========================================================================
-    bird_r <= bird_on AND (
-                  '1'       WHEN SW(3) = '1' ELSE   -- red     : R=1
-                  '1'       WHEN SW(4) = '1' ELSE   -- orange  : R=1
-                  '0'       WHEN SW(5) = '1' ELSE   -- yellow  : R=1
-                  '0'       WHEN SW(6) = '1' ELSE   -- green   : R=0
-                  '0'       WHEN SW(7) = '1' ELSE   -- blue    : R=0
-                  '1'       WHEN SW(8) = '1' ELSE   -- purple  : R=1
-                  '1');                              -- white   : R=1
+    bird_r <= bird_on WHEN SW(3) = '1' ELSE
+          bird_on WHEN SW(4) = '1' ELSE
+          '0'     WHEN SW(5) = '1' ELSE
+          '0'     WHEN SW(6) = '1' ELSE
+          '0'     WHEN SW(7) = '1' ELSE
+          bird_on WHEN SW(8) = '1' ELSE
+          bird_on;
 
-    bird_g <= bird_on AND (
-                  '0'       WHEN SW(3) = '1' ELSE   -- red     : G=0
-                  '1'       WHEN SW(4) = '1' ELSE   -- orange  : G=1
-                  '1'       WHEN SW(5) = '1' ELSE   -- yellow  : G=1
-                  '1'       WHEN SW(6) = '1' ELSE   -- green   : G=1
-                  '0'       WHEN SW(7) = '1' ELSE   -- blue    : G=0
-                  '0'       WHEN SW(8) = '1' ELSE   -- purple  : G=0
-                  '1');                              -- white   : G=1
+    bird_g <= '0'     WHEN SW(3) = '1' ELSE
+              bird_on WHEN SW(4) = '1' ELSE
+              bird_on WHEN SW(5) = '1' ELSE
+              bird_on WHEN SW(6) = '1' ELSE
+              '0'     WHEN SW(7) = '1' ELSE
+              '0'     WHEN SW(8) = '1' ELSE
+              bird_on;
 
-    bird_b <= bird_on AND (
-                  '0'       WHEN SW(3) = '1' ELSE   -- red     : B=0
-                  '0'       WHEN SW(4) = '1' ELSE   -- orange  : B=0
-                  '1'       WHEN SW(5) = '1' ELSE   -- yellow  : B=0
-                  '0'       WHEN SW(6) = '1' ELSE   -- green   : B=0
-                  '1'       WHEN SW(7) = '1' ELSE   -- blue    : B=1
-                  '1'       WHEN SW(8) = '1' ELSE   -- purple  : B=1
-                  '1');                              -- white   : B=1
+    bird_b <= '0'     WHEN SW(3) = '1' ELSE
+              '0'     WHEN SW(4) = '1' ELSE
+              bird_on WHEN SW(5) = '1' ELSE
+              '0'     WHEN SW(6) = '1' ELSE
+              bird_on WHEN SW(7) = '1' ELSE
+              bird_on WHEN SW(8) = '1' ELSE
+              bird_on;
 
     -- =========================================================================
     -- Text overlay: active regions
