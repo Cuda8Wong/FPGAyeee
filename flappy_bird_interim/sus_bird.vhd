@@ -479,7 +479,8 @@ BEGIN
     LEDR(1)          <= right_btn;
     LEDR(2)          <= paused;
     LEDR(8)          <= bird_falling;
-    LEDR(9 DOWNTO 3) <= (OTHERS => '0');
+	 LEDR(9) 			<= '0';
+    LEDR(7 DOWNTO 3) <= (OTHERS => '0');
 
     -- =========================================================================
     -- Seven-segment displays

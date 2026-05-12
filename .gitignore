@@ -9,3 +9,4 @@
 *.dat
 /MiniprojectResources/db
 .DS_Store
+flappy_bird_interim/sus_bird.qsf
