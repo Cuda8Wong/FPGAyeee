@@ -1,6 +1,6 @@
 -- =============================================================================
 -- star_field.vhd
--- Scrolling starfield: 40 stars, 1 px each, move left 2 px/frame (~60 Hz).
+-- Scrolling starfield: # stars, 1 px each, move left 2 px/frame (~60 Hz).
 -- 16-bit LFSR for pseudo-random Y on star respawn.
 -- Freezes when paused = '1'.
 -- =============================================================================
