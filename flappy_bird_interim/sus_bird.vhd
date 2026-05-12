@@ -2,6 +2,14 @@
 -- sus_bird.vhd
 -- Top-level entity for Flappy Bird interim demo (COMPSYS 305)
 -- DE0-CV board
+--
+-- Changes from previous version:
+--   * Bird moved to horizontal centre (~column 320)
+--   * "SUS BIRD" title moved to centre-top (cols 272-319 approx)
+--   * On-screen up-counting timer added at top-left (cols 0-63, rows 16-31)
+--     via screen_timer.vhd sub-module
+--   * Starfield extracted to star_field.vhd sub-module
+--   * Bird colour selectable via SW[3:8]
 -- =============================================================================
 
 LIBRARY IEEE;
@@ -34,6 +42,9 @@ END sus_bird;
 
 ARCHITECTURE behavior OF sus_bird IS
 
+    -- =========================================================================
+    -- Component declarations
+    -- =========================================================================
     COMPONENT VGA_SYNC
         PORT (
             clock_25Mhz, red, green, blue   : IN  STD_LOGIC;
@@ -64,6 +75,34 @@ ARCHITECTURE behavior OF sus_bird IS
         );
     END COMPONENT;
 
+    COMPONENT star_field
+        PORT (
+            clk_25    : IN  STD_LOGIC;
+            vert_sync : IN  STD_LOGIC;
+            reset     : IN  STD_LOGIC;
+            paused    : IN  STD_LOGIC;
+            pixel_row : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
+            pixel_col : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
+            star_on   : OUT STD_LOGIC
+        );
+    END COMPONENT;
+
+    COMPONENT screen_timer
+        PORT (
+            clk_25    : IN  STD_LOGIC;
+            clk_50    : IN  STD_LOGIC;
+            vert_sync : IN  STD_LOGIC;
+            reset     : IN  STD_LOGIC;
+            paused    : IN  STD_LOGIC;
+            pixel_row : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
+            pixel_col : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
+            timer_on  : OUT STD_LOGIC
+        );
+    END COMPONENT;
+
+    -- =========================================================================
+    -- Helper function: 4-bit BCD → 7-segment (active-low segments)
+    -- =========================================================================
     FUNCTION hex_to_seg(digit : STD_LOGIC_VECTOR(3 DOWNTO 0))
             RETURN STD_LOGIC_VECTOR IS
         VARIABLE seg : STD_LOGIC_VECTOR(6 DOWNTO 0);
@@ -90,16 +129,14 @@ ARCHITECTURE behavior OF sus_bird IS
     END FUNCTION;
 
     -- =========================================================================
-    -- Character ROM address map (TCGROM.MIF)
-    -- A=1 B=2 C=3 D=4 E=5 F=6 G=7 H=8 I=9 J=10 K=11 L=12 M=13
-    -- N=14 O=15 P=16 Q=17 R=18 S=19 T=20 U=21 V=22 W=23 X=24 Y=25 Z=26
-    -- =========================================================================
-
     -- Clock / reset
+    -- =========================================================================
     SIGNAL clk_25           : STD_LOGIC := '0';
     SIGNAL reset            : STD_LOGIC;
 
-    -- VGA
+    -- =========================================================================
+    -- VGA signals
+    -- =========================================================================
     SIGNAL pixel_row        : STD_LOGIC_VECTOR(9 DOWNTO 0);
     SIGNAL pixel_column     : STD_LOGIC_VECTOR(9 DOWNTO 0);
     SIGNAL vert_sync        : STD_LOGIC;
@@ -111,13 +148,18 @@ ARCHITECTURE behavior OF sus_bird IS
     SIGNAL green_out        : STD_LOGIC;
     SIGNAL blue_out         : STD_LOGIC;
 
+    -- =========================================================================
     -- Mouse
+    -- =========================================================================
     SIGNAL mouse_row        : STD_LOGIC_VECTOR(9 DOWNTO 0);
     SIGNAL mouse_col        : STD_LOGIC_VECTOR(9 DOWNTO 0);
     SIGNAL left_btn         : STD_LOGIC;
     SIGNAL right_btn        : STD_LOGIC;
 
+    -- =========================================================================
     -- Bird
+    -- Bird X shifted to screen centre (~320), fixed horizontal position.
+    -- =========================================================================
     CONSTANT BIRD_X         : STD_LOGIC_VECTOR(9 DOWNTO 0)
                               := CONV_STD_LOGIC_VECTOR(100, 10);
     CONSTANT BIRD_SIZE      : STD_LOGIC_VECTOR(9 DOWNTO 0)
@@ -144,14 +186,23 @@ ARCHITECTURE behavior OF sus_bird IS
     SIGNAL bird_g           : STD_LOGIC;
     SIGNAL bird_b           : STD_LOGIC;
 
+    -- =========================================================================
     -- Pause
+    -- =========================================================================
     SIGNAL paused           : STD_LOGIC;
     SIGNAL key1_prev        : STD_LOGIC;
 
     -- =========================================================================
-    -- Text overlay signals
+    -- Title text overlay ("SUS BIRD" centred, rows 16-39)
+    --
+    -- "SUS"  2x scale (16px/char): 3 chars = 48px wide
+    --   Centred at col 320: start col = 320 - 24 = 296
+    --   Cols 296-343, rows 16-31
+    --
+    -- "BIRD" 1x scale (8px/char): 4 chars = 32px wide
+    --   Centred at col 320: start col = 320 - 16 = 304
+    --   Cols 304-335, rows 32-39
     -- =========================================================================
-
     SIGNAL large_text_on    : STD_LOGIC;
     SIGNAL small_text_on    : STD_LOGIC;
     SIGNAL title_active     : STD_LOGIC;
@@ -162,12 +213,11 @@ ARCHITECTURE behavior OF sus_bird IS
     SIGNAL large_char_addr  : STD_LOGIC_VECTOR(5 DOWNTO 0);
     SIGNAL small_char_addr  : STD_LOGIC_VECTOR(5 DOWNTO 0);
 
-    SIGNAL paused_text_on   : STD_LOGIC;
-    SIGNAL paused_active_d  : STD_LOGIC;
-    SIGNAL paused_col_off   : STD_LOGIC_VECTOR(9 DOWNTO 0);
-    SIGNAL paused_char_idx  : STD_LOGIC_VECTOR(2 DOWNTO 0);
-    SIGNAL paused_char_addr : STD_LOGIC_VECTOR(5 DOWNTO 0);
+    -- Column offsets for centred title
+    SIGNAL large_col_off    : STD_LOGIC_VECTOR(9 DOWNTO 0); -- col - 296
+    SIGNAL small_col_off    : STD_LOGIC_VECTOR(9 DOWNTO 0); -- col - 304
 
+    -- Shared char_rom signals (title text)
     SIGNAL char_addr        : STD_LOGIC_VECTOR(5 DOWNTO 0);
     SIGNAL char_font_row    : STD_LOGIC_VECTOR(2 DOWNTO 0);
     SIGNAL char_font_col    : STD_LOGIC_VECTOR(2 DOWNTO 0);
@@ -175,18 +225,16 @@ ARCHITECTURE behavior OF sus_bird IS
     SIGNAL text_on          : STD_LOGIC;
 
     -- =========================================================================
-    -- Starfield
+    -- Sub-module outputs
     -- =========================================================================
-    CONSTANT NUM_STARS      : INTEGER := 40;
-    TYPE pos_array IS ARRAY(0 TO NUM_STARS-1) OF STD_LOGIC_VECTOR(9 DOWNTO 0);
-    SIGNAL star_x           : pos_array;
-    SIGNAL star_y           : pos_array;
-    SIGNAL lfsr_reg         : STD_LOGIC_VECTOR(15 DOWNTO 0) := "1010110011010101";
     SIGNAL star_on          : STD_LOGIC;
+    SIGNAL timer_on         : STD_LOGIC;
 
 BEGIN
 
-    -- 50 MHz -> 25 MHz
+    -- =========================================================================
+    -- 50 MHz → 25 MHz clock divider
+    -- =========================================================================
     clk_div : PROCESS (CLOCK_50)
     BEGIN
         IF rising_edge(CLOCK_50) THEN
@@ -197,7 +245,7 @@ BEGIN
     reset <= NOT KEY(0);
 
     -- =========================================================================
-    -- VGA_SYNC
+    -- VGA_SYNC instance
     -- =========================================================================
     vga_inst : VGA_SYNC
         PORT MAP (
@@ -221,7 +269,7 @@ BEGIN
     VGA_B  <= (OTHERS => blue_out);
 
     -- =========================================================================
-    -- MOUSE
+    -- MOUSE instance
     -- =========================================================================
     mouse_inst : MOUSE
         PORT MAP (
@@ -236,7 +284,7 @@ BEGIN
         );
 
     -- =========================================================================
-    -- char_rom
+    -- char_rom instance (title text only — timer has its own instance)
     -- =========================================================================
     char_rom_inst : char_rom
         PORT MAP (
@@ -248,210 +296,151 @@ BEGIN
         );
 
     -- =========================================================================
+    -- star_field sub-module
+    -- =========================================================================
+    stars : star_field
+        PORT MAP (
+            clk_25    => clk_25,
+            vert_sync => vert_sync,
+            reset     => reset,
+            paused    => paused,
+            pixel_row => pixel_row,
+            pixel_col => pixel_column,
+            star_on   => star_on
+        );
+
+    -- =========================================================================
+    -- screen_timer sub-module
+    -- =========================================================================
+    tmr : screen_timer
+        PORT MAP (
+            clk_25    => clk_25,
+            clk_50    => CLOCK_50,
+            vert_sync => vert_sync,
+            reset     => reset,
+            paused    => paused,
+            pixel_row => pixel_row,
+            pixel_col => pixel_column,
+            timer_on  => timer_on
+        );
+
+    -- =========================================================================
     -- Bird display
     -- =========================================================================
     bird_on <= '1' WHEN (
-            ('0' & BIRD_X     <= pixel_column + BIRD_SIZE) AND
+            ('0' & BIRD_X      <= pixel_column + BIRD_SIZE) AND
             ('0' & pixel_column <= '0' & BIRD_X    + BIRD_SIZE) AND
-            ('0' & bird_y_pos  <= pixel_row   + BIRD_SIZE) AND
-            ('0' & pixel_row   <= '0' & bird_y_pos + BIRD_SIZE)
+            ('0' & bird_y_pos   <= pixel_row   + BIRD_SIZE) AND
+            ('0' & pixel_row    <= '0' & bird_y_pos + BIRD_SIZE)
         ) ELSE '0';
 
     ground_on <= '1' WHEN pixel_row >= CONV_STD_LOGIC_VECTOR(469, 10) ELSE '0';
 
     -- =========================================================================
     -- Bird colour selection
-    -- SW(3)=red, SW(4)=orange, SW(5)=yellow,
+    -- SW(3)=red, SW(4)=orange*, SW(5)=yellow,
     -- SW(6)=green, SW(7)=blue, SW(8)=purple
-    -- Default (all off): white
-    -- Lowest-numbered active switch wins.
-    --
-    --          R    G    B
-    -- white:   1    1    1
-    -- red:     1    0    0
-    -- orange:  1    1    0   (half-brightness green on a 1-bit DAC — closest approx)
-    -- *yellow*:  0    1    1
-    -- green:   0    1    0
-    -- blue:    0    0    1
-    -- purple:  1    0    1
-    --
-    -- Note: orange and yellow share the same (R=1,G=1,B=0) encoding because
-    -- the VGA interface here is 1-bit per channel.  True orange would need a
-    -- multi-bit DAC; this gives the closest visible distinction available.
+    -- Default: white.  Lowest active switch wins.
+    -- *Orange and yellow are identical on a 1-bit-per-channel VGA output.
     -- =========================================================================
     bird_r <= bird_on WHEN SW(3) = '1' ELSE
-          bird_on WHEN SW(4) = '1' ELSE
-          '0'     WHEN SW(5) = '1' ELSE
-          '0'     WHEN SW(6) = '1' ELSE
-          '0'     WHEN SW(7) = '1' ELSE
-          bird_on WHEN SW(8) = '1' ELSE
-          bird_on;
+        bird_on WHEN SW(4) = '1' ELSE
+        '0'     WHEN SW(5) = '1' ELSE
+        '0'     WHEN SW(6) = '1' ELSE
+        '0'     WHEN SW(7) = '1' ELSE
+        bird_on WHEN SW(8) = '1' ELSE
+        bird_on;
 
     bird_g <= '0'     WHEN SW(3) = '1' ELSE
-              bird_on WHEN SW(4) = '1' ELSE
-              bird_on WHEN SW(5) = '1' ELSE
-              bird_on WHEN SW(6) = '1' ELSE
-              '0'     WHEN SW(7) = '1' ELSE
-              '0'     WHEN SW(8) = '1' ELSE
-              bird_on;
+        bird_on WHEN SW(4) = '1' ELSE
+        bird_on WHEN SW(5) = '1' ELSE
+        bird_on WHEN SW(6) = '1' ELSE
+        '0'     WHEN SW(7) = '1' ELSE
+        '0'     WHEN SW(8) = '1' ELSE
+        bird_on;
 
     bird_b <= '0'     WHEN SW(3) = '1' ELSE
-              '0'     WHEN SW(4) = '1' ELSE
-              bird_on WHEN SW(5) = '1' ELSE
-              '0'     WHEN SW(6) = '1' ELSE
-              bird_on WHEN SW(7) = '1' ELSE
-              bird_on WHEN SW(8) = '1' ELSE
-              bird_on;
+        '0'     WHEN SW(4) = '1' ELSE
+        bird_on WHEN SW(5) = '1' ELSE
+        '0'     WHEN SW(6) = '1' ELSE
+        bird_on WHEN SW(7) = '1' ELSE
+        bird_on WHEN SW(8) = '1' ELSE
+        bird_on;
 
     -- =========================================================================
-    -- Text overlay: active regions
+    -- Title text overlay
+    -- "SUS" 2x: cols 296-343, rows 16-31
+    -- "BIRD" 1x: cols 304-335, rows 32-39
     -- =========================================================================
 
-    large_text_on <= '1' WHEN pixel_column <= 47 AND
-                              pixel_row    >= 16  AND
-                              pixel_row    <= 31  ELSE '0';
+    -- "SUS" region
+    large_text_on <= '1' WHEN pixel_column >= 296 AND pixel_column <= 343 AND
+                              pixel_row    >= 16  AND pixel_row    <= 31
+                    ELSE '0';
 
-    small_text_on <= '1' WHEN pixel_column <= 31 AND
-                              pixel_row    >= 32  AND
-                              pixel_row    <= 39  ELSE '0';
-
-    paused_text_on <= '1' WHEN pixel_column >= 296 AND
-                               pixel_column <= 343 AND
-                               pixel_row    >= 240 AND
-                               pixel_row    <= 247 AND
-                               paused = '1'        ELSE '0';
+    -- "BIRD" region
+    small_text_on <= '1' WHEN pixel_column >= 304 AND pixel_column <= 335 AND
+                              pixel_row    >= 32  AND pixel_row    <= 39
+                    ELSE '0';
 
     title_active <= large_text_on OR small_text_on;
 
-    -- =========================================================================
-    -- Character index and address lookup
-    -- =========================================================================
+    -- Column offsets (subtract start column to get local pixel within text band)
+    large_col_off <= pixel_column - CONV_STD_LOGIC_VECTOR(296, 10);
+    small_col_off <= pixel_column - CONV_STD_LOGIC_VECTOR(304, 10);
 
-    large_char_idx <= pixel_column(5 DOWNTO 4);
+    -- "SUS": each char is 16 px wide (2x), so char index = col_off[5:4]
+    large_char_idx <= large_col_off(5 DOWNTO 4);
 
     WITH large_char_idx SELECT large_char_addr <=
-        CONV_STD_LOGIC_VECTOR(19, 6) WHEN "00",
-        CONV_STD_LOGIC_VECTOR(21, 6) WHEN "01",
-        CONV_STD_LOGIC_VECTOR(19, 6) WHEN OTHERS;
+        CONV_STD_LOGIC_VECTOR(19, 6) WHEN "00",   -- S
+        CONV_STD_LOGIC_VECTOR(21, 6) WHEN "01",   -- U
+        CONV_STD_LOGIC_VECTOR(19, 6) WHEN OTHERS; -- S
 
-    small_char_idx <= pixel_column(4 DOWNTO 3);
+    -- "BIRD": each char is 8 px wide (1x), so char index = col_off[4:3]
+    small_char_idx <= small_col_off(4 DOWNTO 3);
 
     WITH small_char_idx SELECT small_char_addr <=
-        CONV_STD_LOGIC_VECTOR(2,  6) WHEN "00",
-        CONV_STD_LOGIC_VECTOR(9,  6) WHEN "01",
-        CONV_STD_LOGIC_VECTOR(18, 6) WHEN "10",
-        CONV_STD_LOGIC_VECTOR(4,  6) WHEN OTHERS;
+        CONV_STD_LOGIC_VECTOR(2,  6) WHEN "00",   -- B
+        CONV_STD_LOGIC_VECTOR(9,  6) WHEN "01",   -- I
+        CONV_STD_LOGIC_VECTOR(18, 6) WHEN "10",   -- R
+        CONV_STD_LOGIC_VECTOR(4,  6) WHEN OTHERS; -- D
 
-    paused_col_off  <= pixel_column - CONV_STD_LOGIC_VECTOR(296, 10);
-    paused_char_idx <= paused_col_off(5 DOWNTO 3);
-
-    WITH paused_char_idx SELECT paused_char_addr <=
-        CONV_STD_LOGIC_VECTOR(16, 6) WHEN "000",
-        CONV_STD_LOGIC_VECTOR(1,  6) WHEN "001",
-        CONV_STD_LOGIC_VECTOR(21, 6) WHEN "010",
-        CONV_STD_LOGIC_VECTOR(19, 6) WHEN "011",
-        CONV_STD_LOGIC_VECTOR(5,  6) WHEN "100",
-        CONV_STD_LOGIC_VECTOR(4,  6) WHEN OTHERS;
-
-    -- =========================================================================
-    -- char_rom input mux
-    -- Priority: PAUSED > SUS > BIRD (regions do not overlap)
-    -- =========================================================================
-    char_addr <= paused_char_addr WHEN paused_text_on = '1' ELSE
-                 large_char_addr  WHEN large_text_on  = '1' ELSE
-                 small_char_addr  WHEN small_text_on  = '1' ELSE
+    -- char_rom mux: SUS takes priority over BIRD (no overlap at new positions)
+    char_addr <= large_char_addr WHEN large_text_on = '1' ELSE
+                 small_char_addr WHEN small_text_on  = '1' ELSE
                  (OTHERS => '0');
 
-    -- font_row:
-    --   2x scale (SUS rows 16-31):  pixel_row(3:1) = (row-16)/2 with no subtract
-    --   1x scale (BIRD rows 32-39): pixel_row(2:0) = row-32 with no subtract
-    --   1x scale (PAUSED row 240+): pixel_row(2:0) = row-240 with no subtract
+    -- font_row: 2x for SUS (pixel_row[3:1]), 1x for BIRD (pixel_row[2:0])
     char_font_row <= pixel_row(3 DOWNTO 1) WHEN large_text_on = '1' ELSE
                      pixel_row(2 DOWNTO 0);
 
-    -- font_col:
-    --   2x scale (SUS):    pixel_column(3:1)
-    --   1x scale (others): pixel_column(2:0)
-    --   296 and 0 are multiples of 8 so no subtract needed for lower bits
-    char_font_col <= pixel_column(3 DOWNTO 1) WHEN large_text_on = '1' ELSE
-                     pixel_column(2 DOWNTO 0);
+    -- font_col: 2x for SUS (col_off[3:1]), 1x for BIRD (col_off[2:0])
+    char_font_col <= large_col_off(3 DOWNTO 1) WHEN large_text_on = '1' ELSE
+                     small_col_off(2 DOWNTO 0);
 
-    -- =========================================================================
-    -- Register active flags by 1 cycle to align with char_rom output latency
-    -- =========================================================================
+    -- 1-cycle pipeline delay to match char_rom latency
     Text_Pipeline : PROCESS (clk_25)
     BEGIN
         IF rising_edge(clk_25) THEN
-            title_active_d  <= title_active;
-            paused_active_d <= paused_text_on;
+            title_active_d <= title_active;
         END IF;
     END PROCESS Text_Pipeline;
 
-    text_on <= rom_pixel AND ((title_active_d AND SW(1)) OR paused_active_d);
+    -- Title text gated by SW[1]
+    text_on <= rom_pixel AND title_active_d AND SW(1);
 
     -- =========================================================================
     -- Colour generation
-    -- Bird uses its own R/G/B colour signals.
-    -- Text and stars remain white (driven on all three channels equally).
+    -- Bird uses per-channel colour signals.
+    -- Text, timer, and stars are always white.
     -- =========================================================================
-    red_in   <= (text_on OR star_on) OR bird_r;
-    green_in <= (text_on OR star_on) OR bird_g;
-    blue_in  <= (text_on OR star_on) OR bird_b;
+    red_in   <= (text_on OR star_on OR timer_on) OR bird_r;
+    green_in <= (text_on OR star_on OR timer_on) OR bird_g;
+    blue_in  <= (text_on OR star_on OR timer_on) OR bird_b;
 
     -- =========================================================================
-    -- Star display
-    -- =========================================================================
-    Star_Display : PROCESS(pixel_row, pixel_column, star_x, star_y)
-        VARIABLE hit : STD_LOGIC;
-    BEGIN
-        hit := '0';
-        FOR i IN 0 TO NUM_STARS-1 LOOP
-            IF pixel_column = star_x(i) AND pixel_row = star_y(i) THEN
-                hit := '1';
-            END IF;
-        END LOOP;
-        star_on <= hit;
-    END PROCESS Star_Display;
-
-    -- =========================================================================
-    -- Star movement
-    -- =========================================================================
-    Star_Move : PROCESS(vert_sync, reset)
-        VARIABLE lv : STD_LOGIC_VECTOR(15 DOWNTO 0);
-        VARIABLE fb : STD_LOGIC;
-    BEGIN
-        IF reset = '1' THEN
-            lv := "1010110011010101";
-            FOR i IN 0 TO NUM_STARS-1 LOOP
-                fb := lv(15) XOR lv(13) XOR lv(12) XOR lv(10);
-                lv := lv(14 DOWNTO 0) & fb;
-                star_x(i) <= lv(9 DOWNTO 0);
-                fb := lv(15) XOR lv(13) XOR lv(12) XOR lv(10);
-                lv := lv(14 DOWNTO 0) & fb;
-                star_y(i) <= '0' & lv(8 DOWNTO 0);
-            END LOOP;
-            lfsr_reg <= lv;
-
-        ELSIF rising_edge(vert_sync) THEN
-            IF paused = '0' THEN
-                lv := lfsr_reg;
-                FOR i IN 0 TO NUM_STARS-1 LOOP
-                    fb := lv(15) XOR lv(13) XOR lv(12) XOR lv(10);
-                    lv := lv(14 DOWNTO 0) & fb;
-                    IF star_x(i) < CONV_STD_LOGIC_VECTOR(2, 10) THEN
-                        star_x(i) <= CONV_STD_LOGIC_VECTOR(639, 10);
-                        star_y(i) <= '0' & lv(8 DOWNTO 0);
-                    ELSE
-                        star_x(i) <= star_x(i) - CONV_STD_LOGIC_VECTOR(2, 10);
-                    END IF;
-                END LOOP;
-                lfsr_reg <= lv;
-            END IF;
-        END IF;
-    END PROCESS Star_Move;
-
-    -- =========================================================================
-    -- Bird movement
+    -- Bird movement (~60 Hz on vert_sync)
     -- =========================================================================
     Move_Bird : PROCESS(vert_sync, reset)
     BEGIN
@@ -486,7 +475,7 @@ BEGIN
     END PROCESS Move_Bird;
 
     -- =========================================================================
-    -- Pause toggle
+    -- Pause toggle: falling edge on KEY[1]
     -- =========================================================================
     Pause_Toggle : PROCESS(clk_25, reset)
     BEGIN
@@ -512,7 +501,7 @@ BEGIN
     LEDR(7 DOWNTO 3) <= (OTHERS => '0');
 
     -- =========================================================================
-    -- Seven-segment displays
+    -- Seven-segment displays 
     -- =========================================================================
     HEX0 <= hex_to_seg(bird_y_pos(3  DOWNTO 0));
     HEX1 <= hex_to_seg(bird_y_pos(7  DOWNTO 4));
