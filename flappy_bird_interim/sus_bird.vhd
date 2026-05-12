@@ -1,78 +1,4 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 -- ==================================================================
-
-
-
-
-
 -- sus_bird.vhd
 -- Top-level entity for Flappy Bird interim demo (COMPSYS 305)
 -- DE0-CV board
@@ -265,6 +191,11 @@ ARCHITECTURE behavior OF sus_bird IS
     -- =========================================================================
     SIGNAL paused           : STD_LOGIC;
     SIGNAL key1_prev        : STD_LOGIC;
+    SIGNAL paused_text_on   : STD_LOGIC;
+    SIGNAL paused_active_d  : STD_LOGIC;
+    SIGNAL paused_col_off   : STD_LOGIC_VECTOR(9 DOWNTO 0);
+    SIGNAL paused_char_idx  : STD_LOGIC_VECTOR(2 DOWNTO 0);
+    SIGNAL paused_char_addr : STD_LOGIC_VECTOR(5 DOWNTO 0);
 
     -- =========================================================================
     -- Title text overlay ("SUS BIRD" centred, rows 16-39)
@@ -480,29 +411,53 @@ BEGIN
         CONV_STD_LOGIC_VECTOR(18, 6) WHEN "10",   -- R
         CONV_STD_LOGIC_VECTOR(4,  6) WHEN OTHERS; -- D
 
-    -- char_rom mux: SUS takes priority over BIRD (no overlap at new positions)
-    char_addr <= large_char_addr WHEN large_text_on = '1' ELSE
-                 small_char_addr WHEN small_text_on  = '1' ELSE
+    -- =========================================================================
+    -- "PAUSED" text overlay
+    -- 1x scale (8x8 px/char): cols 296-343, rows 240-247, only when paused
+    -- P=16, A=1, U=21, S=19, E=5, D=4
+    -- =========================================================================
+    paused_text_on <= '1' WHEN pixel_column >= 296 AND pixel_column <= 343 AND
+                               pixel_row    >= 240 AND pixel_row    <= 247 AND
+                               paused = '1'
+                      ELSE '0';
+
+    paused_col_off  <= pixel_column - CONV_STD_LOGIC_VECTOR(296, 10);
+    paused_char_idx <= paused_col_off(5 DOWNTO 3);
+
+    WITH paused_char_idx SELECT paused_char_addr <=
+        CONV_STD_LOGIC_VECTOR(16, 6) WHEN "000",  -- P
+        CONV_STD_LOGIC_VECTOR(1,  6) WHEN "001",  -- A
+        CONV_STD_LOGIC_VECTOR(21, 6) WHEN "010",  -- U
+        CONV_STD_LOGIC_VECTOR(19, 6) WHEN "011",  -- S
+        CONV_STD_LOGIC_VECTOR(5,  6) WHEN "100",  -- E
+        CONV_STD_LOGIC_VECTOR(4,  6) WHEN OTHERS; -- D
+
+    -- char_rom mux: PAUSED > SUS > BIRD (regions do not overlap)
+    char_addr <= paused_char_addr WHEN paused_text_on = '1' ELSE
+                 large_char_addr  WHEN large_text_on  = '1' ELSE
+                 small_char_addr  WHEN small_text_on  = '1' ELSE
                  (OTHERS => '0');
 
-    -- font_row: 2x for SUS (pixel_row[3:1]), 1x for BIRD (pixel_row[2:0])
+    -- font_row: 2x for SUS, 1x for BIRD and PAUSED
     char_font_row <= pixel_row(3 DOWNTO 1) WHEN large_text_on = '1' ELSE
                      pixel_row(2 DOWNTO 0);
 
-    -- font_col: 2x for SUS (col_off[3:1]), 1x for BIRD (col_off[2:0])
-    char_font_col <= large_col_off(3 DOWNTO 1) WHEN large_text_on = '1' ELSE
+    -- font_col: 2x for SUS, 1x for BIRD, offset-based for PAUSED
+    char_font_col <= large_col_off(3 DOWNTO 1) WHEN large_text_on  = '1' ELSE
+                     paused_col_off(2 DOWNTO 0) WHEN paused_text_on = '1' ELSE
                      small_col_off(2 DOWNTO 0);
 
     -- 1-cycle pipeline delay to match char_rom latency
     Text_Pipeline : PROCESS (clk_25)
     BEGIN
         IF rising_edge(clk_25) THEN
-            title_active_d <= title_active;
+            title_active_d  <= title_active;
+            paused_active_d <= paused_text_on;
         END IF;
     END PROCESS Text_Pipeline;
 
-    -- Title text gated by SW[1]
-    text_on <= rom_pixel AND title_active_d AND SW(1);
+    -- Title text gated by SW[1]; PAUSED text always visible when paused
+    text_on <= rom_pixel AND ((title_active_d AND SW(1)) OR paused_active_d);
 
     -- =========================================================================
     -- Colour generation
