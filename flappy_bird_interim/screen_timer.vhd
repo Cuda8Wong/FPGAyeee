@@ -164,7 +164,7 @@ BEGIN
     -- =========================================================================
     -- Up-counter: seconds units (0-9)
     -- =========================================================================
-    Cnt_Sec_Units : PROCESS (clk_25, reset)
+    Cnt_Sec_Units_Out : PROCESS (clk_25, reset)
     BEGIN
         IF reset = '1' THEN
             cnt_sec_units <= (OTHERS => '0');
@@ -177,12 +177,12 @@ BEGIN
                 END IF;
             END IF;
         END IF;
-    END PROCESS Cnt_Sec_Units;
+    END PROCESS Cnt_Sec_Units_Out;
 
     -- =========================================================================
     -- Up-counter: seconds tens (0-5), carries when units wraps 9→0
     -- =========================================================================
-    Cnt_Sec_Tens : PROCESS (clk_25, reset)
+    Cnt_Sec_Tens_Out : PROCESS (clk_25, reset)
     BEGIN
         IF reset = '1' THEN
             cnt_sec_tens <= (OTHERS => '0');
@@ -197,12 +197,12 @@ BEGIN
                 END IF;
             END IF;
         END IF;
-    END PROCESS Cnt_Sec_Tens;
+    END PROCESS Cnt_Sec_Tens_Out;
 
     -- =========================================================================
     -- Up-counter: minutes (0-9), carries when both sec digits wrap
     -- =========================================================================
-    Cnt_Min : PROCESS (clk_25, reset)
+    Cnt_Min_Out : PROCESS (clk_25, reset)
     BEGIN
         IF reset = '1' THEN
             cnt_min <= (OTHERS => '0');
@@ -217,7 +217,7 @@ BEGIN
                 END IF;
             END IF;
         END IF;
-    END PROCESS Cnt_Min;
+    END PROCESS Cnt_Min_Out;
 
     -- =========================================================================
     -- Screen region detection

@@ -1,4 +1,78 @@
--- =============================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- ==================================================================
+
+
+
+
+
 -- sus_bird.vhd
 -- Top-level entity for Flappy Bird interim demo (COMPSYS 305)
 -- DE0-CV board
@@ -101,7 +175,7 @@ ARCHITECTURE behavior OF sus_bird IS
     END COMPONENT;
 
     -- =========================================================================
-    -- Helper function: 4-bit BCD → 7-segment (active-low segments)
+    -- Helper function: 4-bit BCD â†’ 7-segment (active-low segments)
     -- =========================================================================
     FUNCTION hex_to_seg(digit : STD_LOGIC_VECTOR(3 DOWNTO 0))
             RETURN STD_LOGIC_VECTOR IS
@@ -233,7 +307,7 @@ ARCHITECTURE behavior OF sus_bird IS
 BEGIN
 
     -- =========================================================================
-    -- 50 MHz → 25 MHz clock divider
+    -- 50 MHz â†’ 25 MHz clock divider
     -- =========================================================================
     clk_div : PROCESS (CLOCK_50)
     BEGIN
@@ -284,7 +358,7 @@ BEGIN
         );
 
     -- =========================================================================
-    -- char_rom instance (title text only — timer has its own instance)
+    -- char_rom instance (title text only â€” timer has its own instance)
     -- =========================================================================
     char_rom_inst : char_rom
         PORT MAP (
