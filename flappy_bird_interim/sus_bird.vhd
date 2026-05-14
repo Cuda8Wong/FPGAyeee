@@ -339,39 +339,39 @@ BEGIN
 
     -- =========================================================================
     -- Bird colour selection
-    -- SW(3)=red
-    -- SW(4)=orange
-    -- SW(5)=yellow
-    -- SW(6)=green
-    -- SW(7)=blue
-    -- SW(8)=purple
+    -- SW(3)= Eed -- RGB(3)=100
+    -- SW(4)= Yellow -- RGB(4)=110
+    -- SW(5)= Cyan -- RGB(5)=011
+    -- SW(6)= Green -- RGB(6)=010
+    -- SW(7)= Blue -- RGB(7)=001
+    -- SW(8)= Purple -- RGB(8)=101
     --
     -- Lowest active switch has priority.
     -- Default colour is white.
     -- =========================================================================
-    bird_r <= bird_on WHEN SW(3) = '1' ELSE
-        bird_on WHEN SW(4) = '1' ELSE
-        '0' WHEN SW(5) = '1' ELSE
-        '0' WHEN SW(6) = '1' ELSE
-        '0' WHEN SW(7) = '1' ELSE
-        bird_on WHEN SW(8) = '1' ELSE
-        bird_on;
+    bird_r <= bird_on WHEN SW(3) = '1' ELSE -- Red : 1
+        bird_on WHEN SW(4) = '1' ELSE -- Yellow : 1
+        '0' WHEN SW(5) = '1' ELSE  -- Cyan : 0
+        '0' WHEN SW(6) = '1' ELSE -- Green : 0
+        '0' WHEN SW(7) = '1' ELSE -- Blue : 0
+        bird_on WHEN SW(8) = '1' ELSE -- Purple : 1
+        bird_on; -- Default white : 1
 
-    bird_g <= '0' WHEN SW(3) = '1' ELSE
-        bird_on WHEN SW(4) = '1' ELSE
-        bird_on WHEN SW(5) = '1' ELSE
-        bird_on WHEN SW(6) = '1' ELSE
-        '0' WHEN SW(7) = '1' ELSE
-        '0' WHEN SW(8) = '1' ELSE
-        bird_on;
+    bird_g <= '0' WHEN SW(3) = '1' ELSE -- Red : 0
+        bird_on WHEN SW(4) = '1' ELSE -- Yellow : 1
+        bird_on WHEN SW(5) = '1' ELSE -- Cyan : 1
+        bird_on WHEN SW(6) = '1' ELSE -- Green : 1
+        '0' WHEN SW(7) = '1' ELSE -- Blue : 0
+        '0' WHEN SW(8) = '1' ELSE -- Purple : 0
+        bird_on; -- Default white : 1
 
-    bird_b <= '0' WHEN SW(3) = '1' ELSE
-        '0' WHEN SW(4) = '1' ELSE
-        bird_on WHEN SW(5) = '1' ELSE
-        '0' WHEN SW(6) = '1' ELSE
-        bird_on WHEN SW(7) = '1' ELSE
-        bird_on WHEN SW(8) = '1' ELSE
-        bird_on;
+    bird_b <= '0' WHEN SW(3) = '1' ELSE -- Red : 0
+        '0' WHEN SW(4) = '1' ELSE -- Yellow : 0
+        bird_on WHEN SW(5) = '1' ELSE -- Cyan : 1
+        '0' WHEN SW(6) = '1' ELSE -- Green : 0
+        bird_on WHEN SW(7) = '1' ELSE -- Blue : 1
+        bird_on WHEN SW(8) = '1' ELSE -- Purple : 1
+        bird_on; -- Default white : 1
 
     -- =========================================================================
     -- Title text regions

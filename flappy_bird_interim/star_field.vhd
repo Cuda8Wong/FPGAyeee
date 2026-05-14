@@ -70,8 +70,7 @@ ARCHITECTURE behavior OF star_field IS
 
     -- 16-bit Linear Feedback Shift Register (LFSR)
     -- Used for pseudo-random number generation
-    SIGNAL lfsr_reg : STD_LOGIC_VECTOR(15 DOWNTO 0)
-        := "1010110011010101";
+    SIGNAL lfsr_reg : STD_LOGIC_VECTOR(15 DOWNTO 0) := "1010110011010101";
 
 BEGIN
 
@@ -98,8 +97,7 @@ BEGIN
         -- Check all stars
         FOR i IN 0 TO NUM_STARS-1 LOOP
 
-            -- Compare current screen pixel
-            -- against this star's coordinates
+            -- Compare current screen pixel against this star's coordinates
             IF pixel_col = star_x(i)
             AND pixel_row = star_y(i) THEN
                 star_hit := '1';
