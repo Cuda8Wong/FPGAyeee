@@ -260,6 +260,7 @@ set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_RO
 set_global_assignment -name PARTITION_COLOR 16764057 -entity DE0_CV_Default -section_id Top
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -entity DE0_CV_Default -section_id Top
 set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "2.5 V"
+set_global_assignment -name VHDL_FILE pipes.vhd
 set_global_assignment -name VHDL_FILE star_field.vhd
 set_global_assignment -name VHDL_FILE screen_timer.vhd
 set_global_assignment -name VHDL_FILE vga_sync.vhd
