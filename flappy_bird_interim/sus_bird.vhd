@@ -115,7 +115,8 @@ ARCHITECTURE behavior OF sus_bird IS
             pixel_col : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
             bird_y    : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
             pipe_on   : OUT STD_LOGIC;
-            collision : OUT STD_LOGIC
+            collision : OUT STD_LOGIC;
+            level_out : OUT STD_LOGIC_VECTOR(3 DOWNTO 0)
         );
     END COMPONENT;
 
@@ -199,6 +200,7 @@ ARCHITECTURE behavior OF sus_bird IS
     SIGNAL pipe_on    : STD_LOGIC;
     SIGNAL collision  : STD_LOGIC;
     SIGNAL collision_r : STD_LOGIC; -- collision registered 1 cycle to break loop
+    SIGNAL level_sig   : STD_LOGIC_VECTOR(3 DOWNTO 0); -- current difficulty level (1-10)
 
     -- Pause
     SIGNAL paused    : STD_LOGIC;
@@ -347,7 +349,8 @@ BEGIN
             pixel_col => pixel_column,
             bird_y    => bird_y_pos,
             pipe_on   => pipe_on,
-            collision => collision
+            collision => collision,
+            level_out => level_sig
         );
 
     -- =========================================================================
@@ -559,8 +562,8 @@ BEGIN
     -- Seven-segment displays
     -- HEX0-1: bird Y    HEX2-3: mouse X    HEX4-5: mouse Y
     -- =========================================================================
-    HEX0 <= hex_to_seg(bird_y_pos(3  DOWNTO 0));
-    HEX1 <= hex_to_seg(bird_y_pos(7  DOWNTO 4));
+    HEX0 <= hex_to_seg(level_sig);              -- current level (1-10, shows as 1-A)
+    HEX1 <= hex_to_seg(bird_y_pos(3  DOWNTO 0));  -- bird Y position
     HEX2 <= hex_to_seg(mouse_col(3   DOWNTO 0));
     HEX3 <= hex_to_seg(mouse_col(7   DOWNTO 4));
     HEX4 <= hex_to_seg(mouse_row(3   DOWNTO 0));

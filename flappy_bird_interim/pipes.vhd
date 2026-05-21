@@ -1,17 +1,20 @@
 -- =============================================================================
 -- pipes.vhd
 --
--- Scrolling pipe obstacle system for Flappy Bird (COMPSYS 305)
+-- Scrolling pipe obstacle system with progressive difficulty levels
 --
--- Features:
---   - 3 pipe slots managed concurrently
---   - Pipes spawn on the right edge every 120 frames (~2 seconds at 60 Hz)
---   - Pipes scroll left at 2 pixels per frame (slow)
---   - Gap Y position randomised using 16-bit LFSR (range 50-305 px from top)
---   - Gap height randomised using LFSR          (range 80-143 px)
---   - Collision detection against bird bounding box
---   - Animation and spawning freeze when paused
---   - Pipes are drawn as solid regions above and below the gap
+-- LEVELS  (1-10)
+--   Level increments every 5 seconds of active play (300 vert_sync pulses)
+--   Level freezes at 10 and resets to 1 on game_reset / collision
+--
+-- PER-LEVEL CHANGES
+--   Speed (px/frame) : 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
+--   Spawn interval   : 119 → 113 → 107 → 101 → 95 → 89 → 83 → 77 → 71 → 65
+--   Gap height range :
+--     Levels 1-2  : 80 + 6 LFSR bits  (range  80-143 px)
+--     Levels 3-5  : 74 + 5 LFSR bits  (range  74-105 px)
+--     Levels 6-10 : 66 + 4 LFSR bits  (range  66-81  px)
+--   Gap top range remains 50-305 px across all levels
 -- =============================================================================
 
 LIBRARY IEEE;
@@ -21,60 +24,49 @@ USE IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 ENTITY pipes IS
     PORT (
-        clk_25    : IN  STD_LOGIC;              -- 25 MHz pixel clock
-        vert_sync : IN  STD_LOGIC;              -- vertical sync (~60 Hz)
-        reset     : IN  STD_LOGIC;              -- active high
-        paused    : IN  STD_LOGIC;              -- freeze when high
+        clk_25    : IN  STD_LOGIC;
+        vert_sync : IN  STD_LOGIC;
+        reset     : IN  STD_LOGIC;
+        paused    : IN  STD_LOGIC;
         pixel_row : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
         pixel_col : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
-        bird_y    : IN  STD_LOGIC_VECTOR(9 DOWNTO 0); -- bird centre Y
-        pipe_on   : OUT STD_LOGIC;              -- current pixel is a pipe pixel
-        collision : OUT STD_LOGIC               -- bird overlaps a pipe
+        bird_y    : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
+        pipe_on   : OUT STD_LOGIC;
+        collision : OUT STD_LOGIC;
+        level_out : OUT STD_LOGIC_VECTOR(3 DOWNTO 0)
     );
 END pipes;
 
 ARCHITECTURE behavior OF pipes IS
 
-    -- =========================================================================
-    -- Pipe parameters
-    -- =========================================================================
-    CONSTANT NUM_PIPES   : INTEGER := 3;    -- pipe slots on screen at once
-    CONSTANT PIPE_WIDTH  : INTEGER := 20;   -- pipe width in pixels
-    CONSTANT PIPE_SPEED  : INTEGER := 2;    -- pixels moved left per frame
-    CONSTANT SPAWN_INT   : INTEGER := 120;  -- frames between spawns (2 s @ 60 Hz)
+    CONSTANT NUM_PIPES   : INTEGER := 3;
+    CONSTANT PIPE_WIDTH  : INTEGER := 20;
+    CONSTANT GAP_TOP_MIN : INTEGER := 50;  -- min Y for gap top edge
 
-    -- Bird bounding box - must match BIRD_X and BIRD_SIZE in sus_bird.vhd
+    -- Bird bounding box (must match sus_bird.vhd)
     CONSTANT BIRD_X_C    : INTEGER := 100;
     CONSTANT BIRD_SZ     : INTEGER := 12;
 
-    -- Gap position/size constraints
-    CONSTANT GAP_TOP_MIN : INTEGER := 50;   -- min row for gap top edge
-    CONSTANT GAP_H_MIN   : INTEGER := 80;   -- min gap height in pixels
-    --   gap_top = 50  + LFSR[7:0]  → range  50-305
-    --   gap_h   = 80  + LFSR[5:0]  → range  80-143
-    --   gap_bot = gap_top + gap_h   → max   448  (< ground at 469) ✓
-
-    -- =========================================================================
-    -- Array types for pipe state
-    -- =========================================================================
     TYPE x_arr IS ARRAY(0 TO NUM_PIPES-1) OF STD_LOGIC_VECTOR(9 DOWNTO 0);
     TYPE y_arr IS ARRAY(0 TO NUM_PIPES-1) OF STD_LOGIC_VECTOR(9 DOWNTO 0);
     TYPE f_arr IS ARRAY(0 TO NUM_PIPES-1) OF STD_LOGIC;
 
-    SIGNAL pipe_x   : x_arr;   -- left edge X of each pipe
-    SIGNAL gap_top  : y_arr;   -- top Y of the gap (first open row)
-    SIGNAL gap_bot  : y_arr;   -- bottom Y of the gap (first solid row below)
-    SIGNAL pipe_act : f_arr;   -- '1' when pipe slot is in use
+    SIGNAL pipe_x   : x_arr;
+    SIGNAL gap_top  : y_arr;
+    SIGNAL gap_bot  : y_arr;
+    SIGNAL pipe_act : f_arr;
 
     SIGNAL spawn_cnt : STD_LOGIC_VECTOR(7 DOWNTO 0);
     SIGNAL lfsr_reg  : STD_LOGIC_VECTOR(15 DOWNTO 0) := "1100101010110011";
+    SIGNAL level     : STD_LOGIC_VECTOR(3 DOWNTO 0);  -- 0001-1010 (1-10)
+    SIGNAL sec_cnt   : STD_LOGIC_VECTOR(8 DOWNTO 0);  -- counts vert_syncs (0-299)
 
 BEGIN
 
+    level_out <= level;
+
     -- =========================================================================
     -- PIPE DISPLAY
-    -- Sets pipe_on = '1' when the current VGA pixel falls inside the solid
-    -- region of any active pipe (above or below its gap, above the ground bar)
     -- =========================================================================
     Pipe_Display : PROCESS(pixel_row, pixel_col, pipe_x, gap_top, gap_bot, pipe_act)
         VARIABLE hit : STD_LOGIC;
@@ -82,12 +74,9 @@ BEGIN
         hit := '0';
         FOR i IN 0 TO NUM_PIPES-1 LOOP
             IF pipe_act(i) = '1' THEN
-                -- Within this pipe's horizontal band?
                 IF pixel_col >= pipe_x(i) AND
                    pixel_col <  pipe_x(i) + CONV_STD_LOGIC_VECTOR(PIPE_WIDTH, 10) THEN
-                    -- Within visible rows (stop at ground bar)?
                     IF pixel_row < CONV_STD_LOGIC_VECTOR(469, 10) THEN
-                        -- Solid region: above gap OR below gap
                         IF pixel_row < gap_top(i) OR pixel_row >= gap_bot(i) THEN
                             hit := '1';
                         END IF;
@@ -100,10 +89,6 @@ BEGIN
 
     -- =========================================================================
     -- COLLISION DETECTION
-    -- Checks whether the bird's bounding box overlaps the solid region of
-    -- any active pipe.  Uses the centre coordinates of the bird:
-    --   bird X range : [BIRD_X_C - BIRD_SZ, BIRD_X_C + BIRD_SZ] = [88, 112]
-    --   bird Y range : [bird_y  - BIRD_SZ,  bird_y  + BIRD_SZ ]
     -- =========================================================================
     Collision_Check : PROCESS(bird_y, pipe_x, gap_top, gap_bot, pipe_act)
         VARIABLE col : STD_LOGIC;
@@ -111,11 +96,9 @@ BEGIN
         col := '0';
         FOR i IN 0 TO NUM_PIPES-1 LOOP
             IF pipe_act(i) = '1' THEN
-                -- X overlap: bird right >= pipe left  AND  bird left < pipe right
                 IF pipe_x(i) <= CONV_STD_LOGIC_VECTOR(BIRD_X_C + BIRD_SZ, 10) AND
-                   pipe_x(i) +  CONV_STD_LOGIC_VECTOR(PIPE_WIDTH, 10) >
-                                 CONV_STD_LOGIC_VECTOR(BIRD_X_C - BIRD_SZ, 10) THEN
-                    -- Y overlap: bird enters top pipe OR bottom pipe
+                   pipe_x(i) + CONV_STD_LOGIC_VECTOR(PIPE_WIDTH, 10) >
+                                CONV_STD_LOGIC_VECTOR(BIRD_X_C - BIRD_SZ, 10) THEN
                     IF bird_y < gap_top(i) + CONV_STD_LOGIC_VECTOR(BIRD_SZ, 10) OR
                        bird_y + CONV_STD_LOGIC_VECTOR(BIRD_SZ, 10) >= gap_bot(i) THEN
                         col := '1';
@@ -127,22 +110,18 @@ BEGIN
     END PROCESS Collision_Check;
 
     -- =========================================================================
-    -- PIPE MOVEMENT AND SPAWNING
-    -- Runs once per frame on the rising edge of vert_sync.
-    --   1. Move all active pipes left by PIPE_SPEED pixels
-    --   2. Deactivate any pipe that has scrolled off the left edge
-    --   3. Increment spawn counter; when it reaches SPAWN_INT, activate the
-    --      first free slot with a new pipe at X=639 and an LFSR-random gap
+    -- PIPE MOVEMENT, SPAWNING AND LEVEL PROGRESSION
     -- =========================================================================
     Pipe_Update : PROCESS(vert_sync, reset)
-        VARIABLE lv : STD_LOGIC_VECTOR(15 DOWNTO 0); -- working LFSR copy
-        VARIABLE fb : STD_LOGIC;                      -- LFSR feedback bit
-        VARIABLE gt : STD_LOGIC_VECTOR(9 DOWNTO 0);  -- computed gap top
-        VARIABLE gs : STD_LOGIC_VECTOR(9 DOWNTO 0);  -- computed gap size
-        VARIABLE sp : STD_LOGIC;                      -- spawned-this-frame flag
+        VARIABLE lv          : STD_LOGIC_VECTOR(15 DOWNTO 0);
+        VARIABLE fb          : STD_LOGIC;
+        VARIABLE gt          : STD_LOGIC_VECTOR(9 DOWNTO 0);
+        VARIABLE gs          : STD_LOGIC_VECTOR(9 DOWNTO 0);
+        VARIABLE sp          : STD_LOGIC;
+        VARIABLE curr_speed  : INTEGER;           -- px/frame this level
+        VARIABLE curr_spawn  : STD_LOGIC_VECTOR(7 DOWNTO 0); -- spawn threshold
     BEGIN
         IF reset = '1' THEN
-            -- Deactivate all pipes and park them off-screen
             FOR i IN 0 TO NUM_PIPES-1 LOOP
                 pipe_act(i) <= '0';
                 pipe_x(i)   <= CONV_STD_LOGIC_VECTOR(700, 10);
@@ -151,28 +130,62 @@ BEGIN
             END LOOP;
             spawn_cnt <= (OTHERS => '0');
             lfsr_reg  <= "1100101010110011";
+            level     <= "0001";                  -- start at level 1
+            sec_cnt   <= (OTHERS => '0');
 
         ELSIF rising_edge(vert_sync) THEN
             IF paused = '0' THEN
                 lv := lfsr_reg;
 
-                -- Move active pipes left; deactivate if off screen
+                -- ----------------------------------------------------------------
+                -- Resolve level-dependent parameters for this frame
+                -- Speed rises by 1 px/frame each level (2 at L1, 11 at L10)
+                -- Spawn interval shrinks by 6 frames each level (119 at L1, 65 at L10)
+                -- ----------------------------------------------------------------
+                CASE level IS
+                    WHEN "0001" => curr_speed := 2;  curr_spawn := CONV_STD_LOGIC_VECTOR(119, 8);
+                    WHEN "0010" => curr_speed := 3;  curr_spawn := CONV_STD_LOGIC_VECTOR(113, 8);
+                    WHEN "0011" => curr_speed := 4;  curr_spawn := CONV_STD_LOGIC_VECTOR(107, 8);
+                    WHEN "0100" => curr_speed := 5;  curr_spawn := CONV_STD_LOGIC_VECTOR(101, 8);
+                    WHEN "0101" => curr_speed := 6;  curr_spawn := CONV_STD_LOGIC_VECTOR(95,  8);
+                    WHEN "0110" => curr_speed := 7;  curr_spawn := CONV_STD_LOGIC_VECTOR(89,  8);
+                    WHEN "0111" => curr_speed := 8;  curr_spawn := CONV_STD_LOGIC_VECTOR(83,  8);
+                    WHEN "1000" => curr_speed := 9;  curr_spawn := CONV_STD_LOGIC_VECTOR(77,  8);
+                    WHEN "1001" => curr_speed := 10; curr_spawn := CONV_STD_LOGIC_VECTOR(71,  8);
+                    WHEN OTHERS => curr_speed := 11; curr_spawn := CONV_STD_LOGIC_VECTOR(65,  8);
+                END CASE;
+
+                -- ----------------------------------------------------------------
+                -- Level progression: increment level every 300 vert_syncs (~5 s)
+                -- ----------------------------------------------------------------
+                IF sec_cnt >= CONV_STD_LOGIC_VECTOR(299, 9) THEN
+                    sec_cnt <= (OTHERS => '0');
+                    IF level < "1010" THEN        -- cap at level 10
+                        level <= level + 1;
+                    END IF;
+                ELSE
+                    sec_cnt <= sec_cnt + 1;
+                END IF;
+
+                -- ----------------------------------------------------------------
+                -- Move active pipes left at the current speed
+                -- ----------------------------------------------------------------
                 FOR i IN 0 TO NUM_PIPES-1 LOOP
                     IF pipe_act(i) = '1' THEN
-                        IF pipe_x(i) < CONV_STD_LOGIC_VECTOR(PIPE_SPEED, 10) THEN
+                        IF pipe_x(i) < CONV_STD_LOGIC_VECTOR(curr_speed, 10) THEN
                             pipe_act(i) <= '0';
                         ELSE
                             pipe_x(i) <= pipe_x(i) -
-                                         CONV_STD_LOGIC_VECTOR(PIPE_SPEED, 10);
+                                         CONV_STD_LOGIC_VECTOR(curr_speed, 10);
                         END IF;
                     END IF;
                 END LOOP;
 
-                -- Spawn logic
-                IF spawn_cnt >= CONV_STD_LOGIC_VECTOR(SPAWN_INT - 1, 8) THEN
+                -- ----------------------------------------------------------------
+                -- Spawn a new pipe when the counter fires
+                -- ----------------------------------------------------------------
+                IF spawn_cnt >= curr_spawn THEN
                     spawn_cnt <= (OTHERS => '0');
-
-                    -- Activate the first free slot
                     sp := '0';
                     FOR i IN 0 TO NUM_PIPES-1 LOOP
                         IF pipe_act(i) = '0' AND sp = '0' THEN
@@ -183,11 +196,24 @@ BEGIN
                             gt := CONV_STD_LOGIC_VECTOR(GAP_TOP_MIN, 10) +
                                   ("00" & lv(7 DOWNTO 0));
 
-                            -- Random gap height: 80 + 6 LFSR bits → range 80-143
+                            -- Random gap height: range narrows as level increases
                             fb := lv(15) XOR lv(13) XOR lv(12) XOR lv(10);
                             lv := lv(14 DOWNTO 0) & fb;
-                            gs := CONV_STD_LOGIC_VECTOR(GAP_H_MIN, 10) +
-                                  ("0000" & lv(5 DOWNTO 0));
+
+                            CASE level IS
+                                -- Levels 1-2: wide gap  80-143 px (6 random bits)
+                                WHEN "0001" | "0010" =>
+                                    gs := CONV_STD_LOGIC_VECTOR(80, 10) +
+                                          ("0000" & lv(5 DOWNTO 0));
+                                -- Levels 3-5: medium gap  74-105 px (5 random bits)
+                                WHEN "0011" | "0100" | "0101" =>
+                                    gs := CONV_STD_LOGIC_VECTOR(74, 10) +
+                                          ("00000" & lv(4 DOWNTO 0));
+                                -- Levels 6-10: narrow gap  66-81 px (4 random bits)
+                                WHEN OTHERS =>
+                                    gs := CONV_STD_LOGIC_VECTOR(66, 10) +
+                                          ("000000" & lv(3 DOWNTO 0));
+                            END CASE;
 
                             pipe_x(i)   <= CONV_STD_LOGIC_VECTOR(639, 10);
                             gap_top(i)  <= gt;
